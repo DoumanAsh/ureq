@@ -464,9 +464,6 @@ impl Response {
 fn parse_status_line(line: &str) -> Result<(ResponseStatusIndex, u16), Error> {
     //
 
-    if !line.is_ascii() {
-        return Err(BadStatus.msg("Status line not ASCII"));
-    }
     // https://tools.ietf.org/html/rfc7230#section-3.1.2
     //      status-line = HTTP-version SP status-code SP reason-phrase CRLF
     let split: Vec<&str> = line.splitn(3, ' ').collect();
@@ -529,14 +526,16 @@ impl FromStr for Response {
 }
 
 fn read_next_line(reader: &mut impl BufRead) -> io::Result<String> {
-    let mut s = String::new();
-    if reader.read_line(&mut s)? == 0 {
+    let mut bytes = vec![];
+    let count = reader.read_until(b'\n', &mut bytes)?;
+    if count == 0 {
         return Err(io::Error::new(
             io::ErrorKind::ConnectionAborted,
             "Unexpected EOF",
         ));
     }
 
+    let mut s = String::from_utf8_lossy(&bytes).to_string();
     if !s.ends_with("\n") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -745,6 +744,18 @@ mod tests {
         let s = "HTTP/1.1 BORKED\r\n".to_string();
         let err = s.parse::<Response>().unwrap_err();
         assert_eq!(err.kind(), BadStatus);
+    }
+
+    #[test]
+    #[cfg(feature = "charset")]
+    fn read_next_line_non_ascii_reason() {
+        let (cow, _, _) =
+            encoding_rs::WINDOWS_1252.encode("HTTP/1.1 302 Déplacé Temporairement\r\n");
+        let bytes = cow.to_vec();
+        let mut reader = io::BufReader::new(io::Cursor::new(bytes));
+        let s = read_next_line(&mut reader).unwrap();
+        // � is U+FFFD REPLACEMENT CHARACTER as per doc for String::from_utf8_lossy
+        assert_eq!(s, "HTTP/1.1 302 D�plac� Temporairement");
     }
 
     #[test]
