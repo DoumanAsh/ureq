@@ -175,6 +175,7 @@ pub(crate) fn connect(
     }
     let retryable = req.is_retryable(&body);
 
+    debug!("Sending request body");
     // send the body (which can be empty now depending on redirects)
     body::send_body(body, unit.is_chunked, &mut stream)?;
 
@@ -199,7 +200,9 @@ pub(crate) fn connect(
             return connect(req, unit, false, redirect_count, empty, redir);
         }
         // Non-retryable errors return early.
-        return Err(resp.into_synthetic_error().unwrap());
+        let error = resp.into_synthetic_error().unwrap();
+        debug!("Unable to retry request: {:?}", error);
+        return Err(error);
     }
 
     // squirrel away cookies
